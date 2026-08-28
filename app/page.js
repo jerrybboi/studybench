@@ -199,7 +199,7 @@ export default function StudyBench() {
           StudyBench
         </h1>
         <p className="text-[#9DB8AA] text-sm mt-2" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
-          Math &amp; Physics practice, built for JKU exam season
+          Math & Physics practice, built for exam season
         </p>
 
         {session && (
