@@ -1,81 +1,30 @@
-"use client";
+const SECRET_KEY = process.env.TURNSTILE_SECRET_KEY;
 
-import { useEffect, useRef } from "react";
-import Script from "next/script";
+export async function verifyTurnstile(token) {
+  if (!SECRET_KEY || !token) {
+    return false;
+  }
 
-const SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
-
-export default function Turnstile({ onToken }) {
-  const containerRef = useRef(null);
-  const widgetIdRef = useRef(null);
-
-  useEffect(() => {
-    if (!SITE_KEY) return;
-
-    function renderWidget() {
-      if (
-        !window.turnstile ||
-        !containerRef.current ||
-        widgetIdRef.current !== null
-      ) {
-        return;
+  try {
+    const response = await fetch(
+      "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          secret: SECRET_KEY,
+          response: token,
+        }),
       }
+    );
 
-      widgetIdRef.current = window.turnstile.render(containerRef.current, {
-        sitekey: SITE_KEY,
+    const data = await response.json();
 
-        callback: (token) => {
-          onToken(token);
-        },
-
-        "expired-callback": () => {
-          onToken(null);
-        },
-
-        "error-callback": () => {
-          onToken(null);
-        },
-      });
-    }
-
-    if (window.turnstile) {
-      renderWidget();
-    }
-
-    window.addEventListener("load", renderWidget);
-
-    return () => {
-      window.removeEventListener("load", renderWidget);
-
-      if (
-        window.turnstile &&
-        widgetIdRef.current !== null
-      ) {
-        try {
-          window.turnstile.remove(widgetIdRef.current);
-        } catch (e) {
-          // Ignore cleanup errors
-        }
-      }
-
-      widgetIdRef.current = null;
-    };
-  }, [onToken]);
-
-  return (
-    <>
-      <Script
-        src="https://challenges.cloudflare.com/turnstile/v0/api.js"
-        strategy="afterInteractive"
-      />
-
-      <div ref={containerRef} className="my-3" />
-
-      {!SITE_KEY && (
-        <p className="text-[#C4544A] text-xs">
-          CAPTCHA not configured — missing NEXT_PUBLIC_TURNSTILE_SITE_KEY.
-        </p>
-      )}
-    </>
-  );
+    return data.success === true;
+  } catch (error) {
+    console.error("Turnstile verification error:", error);
+    return false;
+  }
 }
