@@ -1,29 +1,53 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Nav from "../components/Nav";
 import Footer from "../components/Footer";
+import { supabase } from "../lib/supabaseClient";
 
 const CATEGORIES = ["All", "Mathematics", "Physics", "Biology", "Chemistry", "History", "Government"];
-
-const BOOKS = [
-  { cat: "Mathematics", title: "Calculus Volume 1", desc: "Limits, derivatives, integrals - the full first-year sequence, openly licensed.", free: true },
-  { cat: "Mathematics", title: "Introduction to Linear Algebra", desc: "Vectors, matrices, and transformations for beginning students.", free: true },
-  { cat: "Physics", title: "University Physics Vol. 1", desc: "Mechanics, waves, and thermodynamics with worked examples.", free: true },
-  { cat: "Biology", title: "Concepts of Biology", desc: "A full introductory course covering cells to ecosystems.", free: true },
-  { cat: "Chemistry", title: "General Chemistry", desc: "Atomic structure through reaction kinetics, university level.", free: true },
-  { cat: "Government", title: "American Government 3e", desc: "Institutions, civil liberties, and the political process.", free: true },
-  { cat: "History", title: "The Penguin History of Europe", desc: "A widely respected single-volume survey - not openly licensed.", free: false },
-  { cat: "History", title: "A People's History, Vol. 2", desc: "Modern era coverage with primary source excerpts.", free: false },
-];
 
 export default function EducationalPage() {
   const [filter, setFilter] = useState("All");
   const [search, setSearch] = useState("");
+  const [books, setBooks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState(null);
 
-  const filtered = BOOKS.filter((b) => {
-    const matchesCat = filter === "All" || b.cat === filter;
-    const matchesSearch = (b.title + b.desc + b.cat).toLowerCase().includes(search.toLowerCase());
+  useEffect(() => {
+    async function loadBooks() {
+      const { data, error } = await supabase
+        .from("books")
+        .select("*")
+        .eq("wing", "educational")
+        .eq("status", "published")
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        setErrorMsg("Failed to load textbooks. Please try again.");
+      } else if (data) {
+        setBooks(data);
+      }
+      setLoading(false);
+    }
+    loadBooks();
+  }, []);
+
+  const handleAction = (book) => {
+    if (book.is_free) {
+      alert(`Opening reader for: ${book.title}`);
+    } else if (book.amazon_query) {
+      const url = `https://www.amazon.com/s?k=${encodeURIComponent(book.amazon_query)}`;
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  };
+
+  const filtered = books.filter((b) => {
+    const matchesCat = filter === "All" || b.category === filter;
+    const titleText = b.title || "";
+    const descText = b.description || "";
+    const catText = b.category || "";
+    const matchesSearch = (titleText + descText + catText).toLowerCase().includes(search.toLowerCase());
     return matchesCat && matchesSearch;
   });
 
@@ -47,7 +71,7 @@ export default function EducationalPage() {
         </div>
         <div className="filters">
           {CATEGORIES.map((c) => (
-            <button key={c} className={`filter ${filter === c ? "active" : ""}`} onClick={() => setFilter(c)}>
+            <button key={c} className={`edu-filter ${filter === c ? "active" : ""}`} onClick={() => setFilter(c)}>
               {c}
             </button>
           ))}
@@ -55,18 +79,30 @@ export default function EducationalPage() {
       </div>
 
       <div className="catalog">
-        {filtered.map((b) => (
-          <div className="card" key={b.title}>
-            <div className="card-cat">{b.cat}</div>
-            <div className="card-title">{b.title}</div>
-            <div className="card-desc">{b.desc}</div>
-            <div className="card-foot">
-              <span className={`badge ${b.free ? "badge-free" : "badge-buy"}`}>{b.free ? "Free" : "Amazon"}</span>
-              <button className={`card-btn ${b.free ? "read" : "buy"}`}>{b.free ? "Read Now" : "Buy →"}</button>
-            </div>
-          </div>
-        ))}
-        {filtered.length === 0 && <p className="empty">No titles match that search yet.</p>}
+        {loading ? (
+          <p className="empty">Loading titles…</p>
+        ) : errorMsg ? (
+          <p className="empty">{errorMsg}</p>
+        ) : (
+          <>
+            {filtered.map((b) => (
+              <div className="card" key={b.id}>
+                <div className="card-cat">{b.category}</div>
+                <div className="card-title">{b.title}</div>
+                <div className="card-desc">{b.description}</div>
+                <div className="card-foot">
+                  <span className={`badge ${b.is_free ? "badge-free" : "badge-buy"}`}>
+                    {b.is_free ? "Free" : "Amazon"}
+                  </span>
+                  <button onClick={() => handleAction(b)} className={`card-btn ${b.is_free ? "read" : "buy"}`}>
+                    {b.is_free ? "Read Now" : "Buy →"}
+                  </button>
+                </div>
+              </div>
+            ))}
+            {filtered.length === 0 && <p className="empty">No titles match that search yet.</p>}
+          </>
+        )}
       </div>
 
       <Footer />
@@ -122,7 +158,7 @@ export default function EducationalPage() {
           flex-wrap: wrap;
           margin-bottom: 44px;
         }
-        :global(.filter) {
+        .edu-filter {
           font-family: 'IBM Plex Mono', monospace;
           font-size: 0.76rem;
           padding: 8px 15px;
@@ -132,7 +168,7 @@ export default function EducationalPage() {
           cursor: pointer;
           background: transparent;
         }
-        :global(.filter.active) {
+        .edu-filter.active {
           background: var(--brass);
           color: var(--ink);
           border-color: var(--brass);
