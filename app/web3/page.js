@@ -1,32 +1,42 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Nav from "../components/Nav";
 import Footer from "../components/Footer";
+import { supabase } from "../lib/supabaseClient";
 
 const CATEGORIES = ["All", "Fundamentals", "DeFi", "DAOs", "NFTs", "Compliance"];
 
-const BOOKS = [
-  { cat: "Fundamentals", title: "Understanding Blockchain Technology", desc: "How blocks, hashing, and consensus actually work." },
-  { cat: "Fundamentals", title: "Introduction to Cryptocurrency", desc: "Wallets, transactions, and the major coins explained." },
-  { cat: "Fundamentals", title: "Wallet Types & Security", desc: "Hot vs cold storage, seed phrases, and staying safe." },
-  { cat: "DAOs", title: "DAOs: The Future of Organizations", desc: "How decentralized governance actually functions." },
-  { cat: "DAOs", title: "The Architecture of Decentralized Governance", desc: "Voting models, proposal lifecycles, and treasuries." },
-  { cat: "DAOs", title: "Finding Your DAO Community", desc: "How to evaluate and join a DAO the right way." },
-  { cat: "DeFi", title: "What is DeFi?", desc: "Decentralized finance, explained from first principles." },
-  { cat: "DeFi", title: "DeFi Lending & Borrowing", desc: "Supplying assets, collateral, and liquidation risk." },
-  { cat: "DeFi", title: "Automated Market Makers", desc: "How Uniswap-style pools actually price trades." },
-  { cat: "DeFi", title: "Yield Farming: Maximizing Returns", desc: "Strategies, risk tiers, and calculating real APY." },
-  { cat: "NFTs", title: "The NFT Revolution", desc: "What actually makes an NFT valuable, beyond the art." },
-  { cat: "NFTs", title: "Creating Compelling NFT Art", desc: "Styles, tools, and generative collection design." },
-  { cat: "Compliance", title: "Crypto Taxes: What You Need to Know", desc: "Taxable events, cost basis, and common mistakes." },
-  { cat: "Compliance", title: "Tools for Crypto Tax Compliance", desc: "Software options and manual record-keeping methods." },
-];
-
 export default function Web3Page() {
   const [filter, setFilter] = useState("All");
+  const [books, setBooks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState(null);
 
-  const filtered = filter === "All" ? BOOKS : BOOKS.filter((b) => b.cat === filter);
+  useEffect(() => {
+    async function loadBooks() {
+      const { data, error } = await supabase
+        .from("books")
+        .select("*")
+        .eq("wing", "web3")
+        .eq("status", "published")
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        setErrorMsg("Failed to load Web3 guides. Please try again.");
+      } else if (data) {
+        setBooks(data);
+      }
+      setLoading(false);
+    }
+    loadBooks();
+  }, []);
+
+  const handleRead = (book) => {
+    alert(`Opening Web3 Guide: ${book.title}`);
+  };
+
+  const filtered = filter === "All" ? books : books.filter((b) => b.category === filter);
 
   return (
     <>
@@ -40,7 +50,7 @@ export default function Web3Page() {
         </p>
         <div className="filters">
           {CATEGORIES.map((c) => (
-            <button key={c} className={`filter ${filter === c ? "active" : ""}`} onClick={() => setFilter(c)}>
+            <button key={c} className={`web3-filter ${filter === c ? "active" : ""}`} onClick={() => setFilter(c)}>
               {c}
             </button>
           ))}
@@ -54,17 +64,27 @@ export default function Web3Page() {
       </div>
 
       <div className="catalog">
-        {filtered.map((b) => (
-          <div className="card" key={b.title}>
-            <div className="card-cat">{b.cat}</div>
-            <div className="card-title">{b.title}</div>
-            <div className="card-desc">{b.desc}</div>
-            <div className="card-foot">
-              <span className="badge">Free</span>
-              <button className="card-btn">Read Now</button>
+        {loading ? (
+          <p className="empty">Loading titles…</p>
+        ) : errorMsg ? (
+          <p className="empty">{errorMsg}</p>
+        ) : filtered.length === 0 ? (
+          <p className="empty">No guides found in this category.</p>
+        ) : (
+          filtered.map((b) => (
+            <div className="card" key={b.id}>
+              <div className="card-cat">{b.category}</div>
+              <div className="card-title">{b.title}</div>
+              <div className="card-desc">{b.description}</div>
+              <div className="card-foot">
+                <span className="badge">Free</span>
+                <button onClick={() => handleRead(b)} className="card-btn">
+                  Read Now
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
 
       <Footer />
@@ -103,7 +123,7 @@ export default function Web3Page() {
           flex-wrap: wrap;
           margin-bottom: 44px;
         }
-        :global(.filter) {
+        .web3-filter {
           font-family: 'IBM Plex Mono', monospace;
           font-size: 0.76rem;
           padding: 8px 15px;
@@ -113,7 +133,7 @@ export default function Web3Page() {
           cursor: pointer;
           background: transparent;
         }
-        :global(.filter.active) {
+        .web3-filter.active {
           background: var(--teal-soft);
           color: var(--ink);
           border-color: var(--teal-soft);
@@ -133,7 +153,7 @@ export default function Web3Page() {
           color: var(--fog);
           max-width: 640px;
         }
-        .note-box :global(strong) {
+        .note-box strong {
           color: var(--teal-soft);
         }
         .catalog {
@@ -204,6 +224,13 @@ export default function Web3Page() {
           cursor: pointer;
           background: var(--teal-soft);
           color: var(--ink);
+        }
+        .empty {
+          color: var(--fog);
+          font-size: 0.9rem;
+          grid-column: 1 / -1;
+          text-align: center;
+          padding: 40px 0;
         }
       `}</style>
     </>
