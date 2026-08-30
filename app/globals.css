@@ -2,8 +2,38 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=Kalam:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Source+Sans+3:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap");
+
+:root {
+  --ink: #141F2C;
+  --ink-deep: #0B131C;
+  --brass: #C9A227;
+  --brass-soft: #E4C568;
+  --teal: #3F7368;
+  --teal-soft: #6FA79A;
+  --parchment: #F1E8D6;
+  --parchment-dim: #E7DBC2;
+  --parch-ink: #241C10;
+  --fog: #9FB0C0;
+  --danger: #C4544A;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
 
 body {
   margin: 0;
+  background: var(--ink);
+  color: var(--fog);
+  font-family: 'Source Sans 3', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
 }
