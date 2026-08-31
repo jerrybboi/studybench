@@ -1,8 +1,185 @@
 "use client";
 
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { supabase } from "../lib/supabaseClient";
 
 export default function AdminPage() {
+  const router = useRouter();
+  const [checking, setChecking] = useState(true);
+  const [stats, setStats] = useState({
+    users: "-",
+    generations: "-",
+    unlimited: "-",
+    published: "-",
+  });
+  const [books, setBooks] = useState([]);
+  const [logs, setLogs] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({
+    title: "",
+    category: "",
+    wing: "educational",
+    description: "",
+    is_free: true,
+    amazon_query: "",
+    content: "",
+  });
+  const [busy, setBusy] = useState(false);
+
+  async function getAuthHeaders() {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (!token) return null;
+    return { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  }
+
+  useEffect(() => {
+    async function init() {
+      try {
+        const headers = await getAuthHeaders();
+        if (!headers) {
+          router.push("/");
+          return;
+        }
+
+        const checkRes = await fetch("/api/admin/check", { headers });
+        if (!checkRes.ok) {
+          router.push("/");
+          return;
+        }
+
+        const checkData = await checkRes.json();
+        if (!checkData.isAdmin) {
+          router.push("/");
+          return;
+        }
+
+        await Promise.all([loadBooks(headers), loadLogs(headers)]);
+      } catch (err) {
+        router.push("/");
+      } finally {
+        setChecking(false);
+      }
+    }
+    init();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]);
+
+  async function loadBooks(headers) {
+    try {
+      const res = await fetch("/api/admin/books/list", { headers });
+      if (res.ok) {
+        const data = await res.json();
+        setBooks(data.books || []);
+      }
+    } catch (err) {
+      console.error("Failed to fetch books", err);
+    }
+  }
+
+  async function loadLogs(headers) {
+    try {
+      const res = await fetch("/api/admin/logs", { headers });
+      if (res.ok) {
+        const data = await res.json();
+        setLogs(data.logs || []);
+        if (data.stats) {
+          setStats(data.stats);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch logs", err);
+    }
+  }
+
+  async function handleStatus(id, status) {
+    setBusy(true);
+    try {
+      const headers = await getAuthHeaders();
+      if (!headers) {
+        router.push("/");
+        return;
+      }
+      const res = await fetch("/api/admin/books/update", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ id, status }),
+      });
+      if (res.ok) {
+        setBooks((prev) => prev.map((b) => (b.id === id ? { ...b, status } : b)));
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete(id) {
+    if (!confirm("Delete this book permanently?")) return;
+    setBusy(true);
+    try {
+      const headers = await getAuthHeaders();
+      if (!headers) {
+        router.push("/");
+        return;
+      }
+      const res = await fetch("/api/admin/books/delete", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ id }),
+      });
+      if (res.ok) {
+        setBooks((prev) => prev.filter((b) => b.id !== id));
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCreate(e) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const headers = await getAuthHeaders();
+      if (!headers) {
+        router.push("/");
+        return;
+      }
+      const res = await fetch("/api/admin/books/create", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(form),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setBooks((prev) => [data.book, ...prev]);
+        setShowForm(false);
+        setForm({
+          title: "",
+          category: "",
+          wing: "educational",
+          description: "",
+          is_free: true,
+          amazon_query: "",
+          content: "",
+        });
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (checking) {
+    return (
+      <div style={{ padding: 80, textAlign: "center", color: "var(--fog)" }}>
+        Checking admin access…
+      </div>
+    );
+  }
+
   return (
     <>
       <nav>
@@ -18,38 +195,96 @@ export default function AdminPage() {
 
       <div className="wrap">
         <h1 className="page-title">Admin overview</h1>
-        <p className="page-sub warn">
-          ⚠ UI only right now - this route has no real access control yet. Do not treat this as protected until the
-          backend auth check is added.
-        </p>
+        <p className="page-sub warn">Protected by is_admin flag. Only users with profiles.is_admin = true can see this page.</p>
 
         <div className="stats">
           <div className="stat">
             <div className="stat-label">Signed-up users</div>
-            <div className="stat-value">-</div>
-            <div className="stat-sub">connect to Supabase</div>
+            <div className="stat-value">{stats.users}</div>
+            <div className="stat-sub">profiles table</div>
           </div>
           <div className="stat">
             <div className="stat-label">AI generations today</div>
-            <div className="stat-value">-</div>
-            <div className="stat-sub">connect to Supabase</div>
+            <div className="stat-value">{stats.generations}</div>
+            <div className="stat-sub">usage_log (24h window)</div>
           </div>
           <div className="stat">
             <div className="stat-label">Unlimited members</div>
-            <div className="stat-value">-</div>
-            <div className="stat-sub">connect to Supabase</div>
+            <div className="stat-value">{stats.unlimited}</div>
+            <div className="stat-sub">unlimited_until &gt; now</div>
           </div>
           <div className="stat">
             <div className="stat-label">Books published</div>
-            <div className="stat-value">-</div>
-            <div className="stat-sub">connect to Supabase</div>
+            <div className="stat-value">{stats.published}</div>
+            <div className="stat-sub">status = published</div>
           </div>
         </div>
 
         <div className="section-head">
           <h2 className="section-title">Book manager</h2>
-          <button className="upload-btn">+ Upload new book</button>
+          <button className="upload-btn" onClick={() => setShowForm(!showForm)} disabled={busy}>
+            {showForm ? "Cancel" : "+ Upload new book"}
+          </button>
         </div>
+
+        {showForm && (
+          <form className="upload-form" onSubmit={handleCreate}>
+            <div className="form-row">
+              <input
+                placeholder="Title"
+                value={form.title}
+                onChange={(e) => setForm({ ...form, title: e.target.value })}
+                required
+              />
+              <input
+                placeholder="Category"
+                value={form.category}
+                onChange={(e) => setForm({ ...form, category: e.target.value })}
+                required
+              />
+              <select value={form.wing} onChange={(e) => setForm({ ...form, wing: e.target.value })}>
+                <option value="educational">educational</option>
+                <option value="web3">web3</option>
+              </select>
+            </div>
+            <textarea
+              placeholder="Description"
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              required
+              rows={2}
+            />
+            <div className="form-row">
+              <label className="check-label">
+                <input
+                  type="checkbox"
+                  checked={form.is_free}
+                  onChange={(e) => setForm({ ...form, is_free: e.target.checked })}
+                />
+                Free (hosted)
+              </label>
+              {!form.is_free && (
+                <input
+                  placeholder="Amazon search query"
+                  value={form.amazon_query}
+                  onChange={(e) => setForm({ ...form, amazon_query: e.target.value })}
+                />
+              )}
+            </div>
+            {form.is_free && (
+              <textarea
+                placeholder="Full book content (optional for now)"
+                value={form.content}
+                onChange={(e) => setForm({ ...form, content: e.target.value })}
+                rows={4}
+              />
+            )}
+            <button type="submit" className="upload-btn" disabled={busy}>
+              Create as draft
+            </button>
+          </form>
+        )}
+
         <table>
           <thead>
             <tr>
@@ -61,40 +296,77 @@ export default function AdminPage() {
             </tr>
           </thead>
           <tbody>
-            <tr>
-              <td className="book-title-cell">Yield Farming: Maximizing Returns</td>
-              <td>Web3 · DeFi</td>
-              <td>
-                <span className="status status-draft">Draft</span>
-              </td>
-              <td className="mono">-</td>
-              <td className="row-actions">
-                <button className="action-btn publish">Publish</button>
-                <button className="action-btn">Preview</button>
-                <button className="action-btn danger">Delete</button>
-              </td>
-            </tr>
-            <tr>
-              <td className="book-title-cell">Understanding Blockchain Technology</td>
-              <td>Web3 · Fundamentals</td>
-              <td>
-                <span className="status status-published">Published</span>
-              </td>
-              <td className="mono">-</td>
-              <td className="row-actions">
-                <button className="action-btn">Unpublish</button>
-                <button className="action-btn">Preview</button>
-                <button className="action-btn danger">Delete</button>
-              </td>
-            </tr>
+            {books.map((b) => (
+              <tr key={b.id}>
+                <td className="book-title-cell">{b.title}</td>
+                <td>
+                  {b.wing} · {b.category}
+                </td>
+                <td>
+                  <span className={`status ${b.status === "published" ? "status-published" : "status-draft"}`}>
+                    {b.status}
+                  </span>
+                </td>
+                <td className="mono">{b.created_at ? new Date(b.created_at).toLocaleDateString() : "-"}</td>
+                <td className="row-actions">
+                  {b.status === "draft" ? (
+                    <button className="action-btn publish" onClick={() => handleStatus(b.id, "published")} disabled={busy}>
+                      Publish
+                    </button>
+                  ) : (
+                    <button className="action-btn" onClick={() => handleStatus(b.id, "draft")} disabled={busy}>
+                      Unpublish
+                    </button>
+                  )}
+                  <button className="action-btn" disabled>
+                    Preview
+                  </button>
+                  <button className="action-btn danger" onClick={() => handleDelete(b.id)} disabled={busy}>
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {books.length === 0 && (
+              <tr>
+                <td colSpan={5} style={{ color: "var(--fog)", textAlign: "center" }}>
+                  No books yet.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
-        <p className="note">Table shows placeholder rows - wire to a real `books` table in phase 3.</p>
 
         <div className="section-head">
           <h2 className="section-title">Usage &amp; payment log</h2>
         </div>
-        <p className="note">Wire to `usage_log` / `profiles` tables in phase 3.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>User</th>
+              <th>Detail</th>
+              <th>When</th>
+            </tr>
+          </thead>
+          <tbody>
+            {logs.map((row, i) => (
+              <tr key={i}>
+                <td>{row.type}</td>
+                <td className="mono">{row.user}</td>
+                <td>{row.detail}</td>
+                <td className="mono">{row.when}</td>
+              </tr>
+            ))}
+            {logs.length === 0 && (
+              <tr>
+                <td colSpan={4} style={{ color: "var(--fog)", textAlign: "center" }}>
+                  No recent activity.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
 
       <style jsx>{`
@@ -229,6 +501,47 @@ export default function AdminPage() {
           font-size: 0.86rem;
           cursor: pointer;
         }
+        .upload-btn:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+        .upload-form {
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid rgba(201, 162, 39, 0.2);
+          border-radius: 8px;
+          padding: 20px;
+          margin-bottom: 24px;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        .form-row {
+          display: flex;
+          gap: 12px;
+          flex-wrap: wrap;
+          align-items: center;
+        }
+        .upload-form input,
+        .upload-form select,
+        .upload-form textarea {
+          background: rgba(0, 0, 0, 0.25);
+          border: 1px solid rgba(159, 176, 192, 0.25);
+          color: var(--parchment);
+          padding: 10px 12px;
+          border-radius: 4px;
+          font-family: 'Source Sans 3', sans-serif;
+          font-size: 0.9rem;
+          flex: 1;
+          min-width: 140px;
+        }
+        .check-label {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          color: var(--fog);
+          font-size: 0.9rem;
+          white-space: nowrap;
+        }
         table {
           width: 100%;
           border-collapse: collapse;
@@ -284,6 +597,10 @@ export default function AdminPage() {
           color: var(--fog);
           cursor: pointer;
         }
+        .action-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
         .action-btn.publish {
           border-color: rgba(201, 162, 39, 0.4);
           color: var(--brass-soft);
@@ -292,11 +609,9 @@ export default function AdminPage() {
           border-color: rgba(196, 84, 74, 0.4);
           color: var(--danger);
         }
-        .note {
-          font-size: 0.78rem;
-          color: var(--fog);
+        .mono {
           font-family: 'IBM Plex Mono', monospace;
-          margin: 0 0 40px;
+          font-size: 0.78rem;
         }
       `}</style>
     </>
