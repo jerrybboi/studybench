@@ -1,0 +1,99 @@
+import { NextResponse } from "next/server";
+import { getUserFromRequest, supabaseAdmin } from "../../../lib/supabaseServer";
+
+export async function GET(req) {
+  try {
+    const user = await getUserFromRequest(req);
+    if (!user) return NextResponse.json({ error: "Not logged in." }, { status: 401 });
+
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("is_admin")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (!profile?.is_admin) {
+      return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+    }
+
+    // Stats
+    const { count: users } = await supabaseAdmin
+      .from("profiles")
+      .select("*", { count: "exact", head: true });
+
+    const { count: published } = await supabaseAdmin
+      .from("books")
+      .select("*", { count: "exact", head: true })
+      .eq("status", "published");
+
+    const { count: unlimited } = await supabaseAdmin
+      .from("profiles")
+      .select("*", { count: "exact", head: true })
+      .gt("unlimited_until", new Date().toISOString());
+
+    // Generations in last 24h
+    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { data: usageRows } = await supabaseAdmin
+      .from("usage_log")
+      .select("count")
+      .gte("window_start", dayAgo);
+
+    const generations = (usageRows || []).reduce((sum, r) => sum + (r.count || 0), 0);
+
+    // Recent log entries (usage + recent unlimited grants)
+    const { data: recentUsage } = await supabaseAdmin
+      .from("usage_log")
+      .select("user_id, count, window_start")
+      .order("window_start", { ascending: false })
+      .limit(15);
+
+    const { data: recentUnlimited } = await supabaseAdmin
+      .from("profiles")
+      .select("id, unlimited_until")
+      .not("unlimited_until", "is", null)
+      .order("unlimited_until", { ascending: false })
+      .limit(10);
+
+    const logs = [];
+
+    (recentUsage || []).forEach((r) => {
+      logs.push({
+        type: "usage",
+        user: r.user_id ? r.user_id.slice(0, 8) + "…" : "-",
+        detail: `${r.count} generations`,
+        when: r.window_start ? new Date(r.window_start).toLocaleString() : "-",
+        ts: r.window_start ? new Date(r.window_start).getTime() : 0,
+      });
+    });
+
+    (recentUnlimited || []).forEach((r) => {
+      logs.push({
+        type: "unlimited",
+        user: r.id ? r.id.slice(0, 8) + "…" : "-",
+        detail: `unlimited until ${new Date(r.unlimited_until).toLocaleDateString()}`,
+        when: r.unlimited_until ? new Date(r.unlimited_until).toLocaleString() : "-",
+        ts: r.unlimited_until ? new Date(r.unlimited_until).getTime() : 0,
+      });
+    });
+
+    logs.sort((a, b) => b.ts - a.ts);
+    const top20 = logs.slice(0, 20).map(({ type, user, detail, when }) => ({
+      type,
+      user,
+      detail,
+      when,
+    }));
+
+    return NextResponse.json({
+      stats: {
+        users: users ?? 0,
+        generations,
+        unlimited: unlimited ?? 0,
+        published: published ?? 0,
+      },
+      logs: top20,
+    });
+  } catch (err) {
+    return NextResponse.json({ error: "Internal server error." }, { status: 500 });
+  }
+}
