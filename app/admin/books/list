@@ -1,0 +1,32 @@
+import { NextResponse } from "next/server";
+import { getUserFromRequest, supabaseAdmin } from "../../../../lib/supabaseServer";
+
+export async function GET(req) {
+  try {
+    const user = await getUserFromRequest(req);
+    if (!user) return NextResponse.json({ error: "Not logged in." }, { status: 401 });
+
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("is_admin")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (!profile?.is_admin) {
+      return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+    }
+
+    const { data: books, error } = await supabaseAdmin
+      .from("books")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ books });
+  } catch (err) {
+    return NextResponse.json({ error: "Server error." }, { status: 500 });
+  }
+}
