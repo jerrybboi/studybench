@@ -5,6 +5,22 @@ import { supabase } from "../lib/supabaseClient";
 
 const AuthContext = createContext(null);
 
+async function adminStatus(session) {
+  if (!session?.access_token) return false;
+
+  try {
+    const res = await fetch("/api/admin/check", {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    return data.isAdmin === true;
+  } catch {
+    return false;
+  }
+}
+
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(undefined);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -12,16 +28,17 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let active = true;
 
-    async function loadSession() {
-      const { data } = await supabase.auth.getSession();
+    supabase.auth.getSession().then(async ({ data }) => {
       if (!active) return;
-      setSession(data.session || null);
-    }
+      const nextSession = data.session || null;
+      setSession(nextSession);
+      setIsAdmin(await adminStatus(nextSession));
+    });
 
-    loadSession();
-
-    const { data: subscription } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: subscription } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
+      if (!active) return;
       setSession(nextSession || null);
+      setIsAdmin(await adminStatus(nextSession));
     });
 
     return () => {
@@ -30,33 +47,10 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-  useEffect(() => {
-    let active = true;
-
-    async function loadAdminState() {
-      if (!session?.user?.id) {
-        if (active) setIsAdmin(false);
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("is_admin")
-        .eq("id", session.user.id)
-        .maybeSingle();
-
-      if (!active) return;
-      setIsAdmin(!error && data?.is_admin === true);
-    }
-
-    loadAdminState();
-    return () => {
-      active = false;
-    };
-  }, [session?.user?.id]);
-
   async function signOut() {
     await supabase.auth.signOut();
+    setSession(null);
+    setIsAdmin(false);
   }
 
   const value = useMemo(
