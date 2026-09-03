@@ -23,14 +23,36 @@ create table if not exists public.books (
   status text not null default 'draft' check (status in ('draft', 'published')),
   amazon_query text,
   content text,
+  source_url text,
+  source_name text,
+  license_name text,
+  license_url text,
   created_at timestamptz not null default now()
 );
+
+alter table public.books add column if not exists source_url text;
+alter table public.books add column if not exists source_name text;
+alter table public.books add column if not exists license_name text;
+alter table public.books add column if not exists license_url text;
 
 alter table public.profiles enable row level security;
 alter table public.usage_log enable row level security;
 alter table public.books enable row level security;
 
--- Public library access: only published books are readable by anon/authenticated clients.
+create or replace function public.is_admin_user()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.is_admin = true
+  );
+$$;
+
+-- Published library titles are readable by everyone.
 drop policy if exists "Public can view published books" on public.books;
 create policy "Public can view published books"
 on public.books
@@ -38,5 +60,29 @@ for select
 to anon, authenticated
 using (status = 'published');
 
--- profiles and usage_log intentionally have no public client policies.
--- Server routes use SUPABASE_SERVICE_ROLE_KEY for protected reads/writes.
+-- Authenticated admins can manage all book rows, including drafts.
+drop policy if exists "Admins can manage books" on public.books;
+create policy "Admins can manage books"
+on public.books
+for all
+to authenticated
+using (public.is_admin_user())
+with check (public.is_admin_user());
+
+drop policy if exists "Admins can read profiles" on public.profiles;
+create policy "Admins can read profiles"
+on public.profiles
+for select
+to authenticated
+using (public.is_admin_user());
+
+drop policy if exists "Admins can read usage log" on public.usage_log;
+create policy "Admins can read usage log"
+on public.usage_log
+for select
+to authenticated
+using (public.is_admin_user());
+
+grant select, insert, update, delete on public.books to authenticated;
+grant select on public.profiles to authenticated;
+grant select on public.usage_log to authenticated;
