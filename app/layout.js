@@ -1,12 +1,17 @@
 import "./globals.css";
+import { AuthProvider } from "./components/AuthProvider";
+
 export const metadata = {
-  title: "StudyBench — Math & Physics practice",
-  description: "AI-generated practice problems, flashcards, and step-by-step solutions for math & physics exam prep.",
+  title: "StudyBench | Learn, practice, understand",
+  description: "A digital learning space for reading, practice, AI-assisted study, and Web3 education.",
 };
+
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }
