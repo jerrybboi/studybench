@@ -14,31 +14,46 @@ export default function TextbookHostingPage() {
 
   useEffect(() => {
     async function init() {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) return router.replace("/");
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) return router.replace("/");
 
-      const check = await fetch("/api/admin/check", {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        cache: "no-store",
-      });
-      if (!check.ok) return router.replace("/");
+        const check = await fetch("/api/admin/check", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+          cache: "no-store",
+        });
+        if (!check.ok) return router.replace("/");
 
-      await loadBooks();
-      setLoading(false);
+        await loadBooks(session.access_token);
+      } catch (error) {
+        setMessage(error?.message || "Could not load textbook hosting.");
+      } finally {
+        setLoading(false);
+      }
     }
     init();
   }, [router]);
 
-  async function loadBooks() {
-    const { data, error } = await supabase
-      .from("books")
-      .select("id,title,category,status,source_name,license_name,source_file_url,hosted_file_url,storage_path,is_free,wing")
-      .eq("wing", "educational")
-      .eq("is_free", true)
-      .order("title");
+  async function loadBooks(accessToken) {
+    let token = accessToken;
+    if (!token) {
+      const { data: { session } } = await supabase.auth.getSession();
+      token = session?.access_token;
+    }
+    if (!token) throw new Error("Your admin session expired. Sign in again.");
 
-    if (error) setMessage(error.message);
-    else setBooks(data || []);
+    const res = await fetch("/api/admin/books/list", {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not load books.");
+
+    const educationalBooks = (data.books || [])
+      .filter((book) => book.wing === "educational" && book.is_free === true)
+      .sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+
+    setBooks(educationalBooks);
   }
 
   async function mirrorBook(book) {
@@ -61,7 +76,7 @@ export default function TextbookHostingPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not mirror this PDF.");
 
-      await loadBooks();
+      await loadBooks(session.access_token);
       const mb = data.bytes ? (data.bytes / 1024 / 1024).toFixed(1) : null;
       setMessage(`${book.title} is now hosted on StudyBench${mb ? ` (${mb} MB)` : ""}.`);
     } catch (error) {
