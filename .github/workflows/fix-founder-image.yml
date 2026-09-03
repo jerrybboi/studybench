@@ -1,0 +1,59 @@
+name: Fix founder image
+
+on:
+  push:
+    paths:
+      - ".github/workflows/fix-founder-image.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix-founder-image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore the original founder image as a real JPEG
+        shell: python
+        run: |
+          import base64
+          import re
+          import subprocess
+          from pathlib import Path
+
+          old_page = subprocess.check_output([
+              "git", "show",
+              "9ee3584365e111e52e727e141d0b9a98eb9450b2:app/about/page.js"
+          ], text=True)
+
+          match = re.search(r'data:image/jpeg;base64,([^\"]+)', old_page)
+          if not match:
+              raise SystemExit("Could not find the embedded founder JPEG in the earlier About page")
+
+          image_bytes = base64.b64decode(match.group(1))
+          output = Path("public/jerry-boi-founder.jpg")
+          output.write_bytes(image_bytes)
+
+          about = Path("app/about/page.js")
+          text = about.read_text()
+          text = text.replace('/jerry-boi-founder.webp', '/jerry-boi-founder.jpg')
+          about.write_text(text)
+
+          print(f"Wrote {len(image_bytes):,} image bytes to {output}")
+
+      - name: Commit fixed image asset
+        run: |
+          git config user.name "JerryBoi"
+          git config user.email "actions@users.noreply.github.com"
+          git add public/jerry-boi-founder.jpg app/about/page.js
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+            exit 0
+          fi
+          git commit -m "Fix Jerry Boi founder image asset"
+          git push
