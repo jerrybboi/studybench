@@ -3,19 +3,32 @@ import { getUserFromRequest, supabaseAdmin } from "../../lib/supabaseServer";
 
 const FREE_LIMIT = 25;
 const WINDOW_MS = 24 * 60 * 60 * 1000;
+const MAX_PROMPT_CHARS = 8000;
 
 export async function POST(req) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    return NextResponse.json(
-      { error: "Server is missing ANTHROPIC_API_KEY. Add it in Vercel Environment Variables." },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "AI generation is temporarily unavailable." }, { status: 503 });
   }
 
   const user = await getUserFromRequest(req);
   if (!user) {
     return NextResponse.json({ error: "Please log in first." }, { status: 401 });
+  }
+
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+  }
+
+  const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
+  if (!prompt) {
+    return NextResponse.json({ error: "Please enter a prompt." }, { status: 400 });
+  }
+  if (prompt.length > MAX_PROMPT_CHARS) {
+    return NextResponse.json({ error: "That prompt is too long. Please shorten it and try again." }, { status: 413 });
   }
 
   const { data: profile } = await supabaseAdmin
@@ -24,12 +37,13 @@ export async function POST(req) {
     .eq("id", user.id)
     .maybeSingle();
 
-  const isUnlimited = !!profile?.unlimited_until && new Date(profile.unlimited_until) > new Date();
+  const isUnlimited = Boolean(profile?.unlimited_until) && new Date(profile.unlimited_until) > new Date();
+  let nextUsage = null;
 
   if (!isUnlimited) {
     const { data: usage } = await supabaseAdmin
       .from("usage_log")
-      .select("count, window_start")
+      .select("count,window_start")
       .eq("user_id", user.id)
       .maybeSingle();
 
@@ -38,10 +52,10 @@ export async function POST(req) {
     let windowStart = now;
 
     if (usage) {
-      const withinWindow = now - new Date(usage.window_start).getTime() < WINDOW_MS;
-      if (withinWindow) {
-        count = usage.count;
-        windowStart = new Date(usage.window_start).getTime();
+      const parsedStart = new Date(usage.window_start).getTime();
+      if (Number.isFinite(parsedStart) && now - parsedStart < WINDOW_MS) {
+        count = usage.count || 0;
+        windowStart = parsedStart;
       }
     }
 
@@ -53,21 +67,11 @@ export async function POST(req) {
       );
     }
 
-    await supabaseAdmin
-      .from("usage_log")
-      .upsert({ user_id: user.id, count: count + 1, window_start: new Date(windowStart).toISOString() });
-  }
-
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
-  }
-
-  const { prompt } = body || {};
-  if (!prompt || typeof prompt !== "string") {
-    return NextResponse.json({ error: "Missing 'prompt' string in request body." }, { status: 400 });
+    nextUsage = {
+      user_id: user.id,
+      count: count + 1,
+      window_start: new Date(windowStart).toISOString(),
+    };
   }
 
   try {
@@ -86,21 +90,27 @@ export async function POST(req) {
     });
 
     if (!anthropicRes.ok) {
-      const errText = await anthropicRes.text();
-      return NextResponse.json(
-        { error: `Anthropic API error (${anthropicRes.status}): ${errText}` },
-        { status: 502 }
-      );
+      console.error("Anthropic API request failed", anthropicRes.status);
+      return NextResponse.json({ error: "AI generation failed. Please try again later." }, { status: 502 });
     }
 
     const data = await anthropicRes.json();
     const text = (data.content || [])
-      .filter((b) => b.type === "text")
-      .map((b) => b.text)
+      .filter((block) => block.type === "text")
+      .map((block) => block.text)
       .join("\n");
 
+    if (!text) {
+      return NextResponse.json({ error: "The AI returned an empty response. Please try again." }, { status: 502 });
+    }
+
+    if (nextUsage) {
+      const { error: usageError } = await supabaseAdmin.from("usage_log").upsert(nextUsage);
+      if (usageError) console.error("Could not record AI usage", usageError.message);
+    }
+
     return NextResponse.json({ text });
-  } catch (err) {
-    return NextResponse.json({ error: "Failed to reach Anthropic API: " + err.message }, { status: 502 });
+  } catch {
+    return NextResponse.json({ error: "AI generation failed. Please try again later." }, { status: 502 });
   }
 }
