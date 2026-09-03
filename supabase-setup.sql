@@ -31,6 +31,7 @@ create table if not exists public.books (
   source_file_url text,
   hosted_file_url text,
   storage_path text,
+  hosted_parts jsonb,
   created_at timestamptz not null default now()
 );
 
@@ -42,6 +43,7 @@ alter table public.books add column if not exists attribution_text text;
 alter table public.books add column if not exists source_file_url text;
 alter table public.books add column if not exists hosted_file_url text;
 alter table public.books add column if not exists storage_path text;
+alter table public.books add column if not exists hosted_parts jsonb;
 
 alter table public.profiles enable row level security;
 alter table public.usage_log enable row level security;
@@ -94,6 +96,9 @@ using (public.is_admin_user());
 grant select, insert, update, delete on public.books to authenticated;
 grant select on public.profiles to authenticated;
 grant select on public.usage_log to authenticated;
+grant select, insert, update, delete on public.books to service_role;
+grant select on public.profiles to service_role;
+grant select on public.usage_log to service_role;
 
 -- Open Educational PDFs are mirrored into this public bucket by a protected
 -- server route using the service-role client. Public buckets can serve known
