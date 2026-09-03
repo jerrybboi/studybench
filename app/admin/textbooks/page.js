@@ -58,7 +58,7 @@ export default function TextbookHostingPage() {
 
   async function mirrorBook(book) {
     setBusyId(book.id);
-    setMessage(`Copying ${book.title} into StudyBench storage...`);
+    setMessage(`Copying ${book.title} into StudyBench storage... Large books will be split automatically.`);
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -78,7 +78,8 @@ export default function TextbookHostingPage() {
 
       await loadBooks(session.access_token);
       const mb = data.bytes ? (data.bytes / 1024 / 1024).toFixed(1) : null;
-      setMessage(`${book.title} is now hosted on StudyBench${mb ? ` (${mb} MB)` : ""}.`);
+      const partText = data.mode === "parts" ? `, split into ${data.parts} parts` : "";
+      setMessage(`${book.title} is now hosted on StudyBench${mb ? ` (${mb} MB total` : ""}${mb ? partText + ")" : partText}.`);
     } catch (error) {
       setMessage(error?.message || "Could not mirror this PDF.");
     } finally {
@@ -94,7 +95,7 @@ export default function TextbookHostingPage() {
         <div>
           <p className="kicker">Admin · Educational library</p>
           <h1>Textbook hosting</h1>
-          <p className="sub">Copy approved open-license PDFs into StudyBench Storage. Run them one at a time so large books do not compete for upload time.</p>
+          <p className="sub">Copy approved open-license PDFs into StudyBench Storage. Large PDFs are split automatically into smaller hosted parts so they stay within the storage file limit.</p>
         </div>
         <Link href="/admin" className="back">Back to admin</Link>
       </div>
@@ -102,31 +103,36 @@ export default function TextbookHostingPage() {
       {message && <div className="message">{message}</div>}
 
       <div className="list">
-        {books.map((book) => (
-          <section className="book" key={book.id}>
-            <div className="info">
-              <div className="meta">{book.category} · {book.license_name || "Open license"}</div>
-              <h2>{book.title}</h2>
-              <p>{book.source_name || "Open textbook source"}</p>
-              <div className="status">
-                {book.hosted_file_url ? <span className="hosted">Hosted on StudyBench</span> : <span className="pending">Not mirrored yet</span>}
+        {books.map((book) => {
+          const parts = Array.isArray(book.hosted_parts) ? book.hosted_parts : [];
+          const isHosted = Boolean(book.hosted_file_url) || parts.length > 0;
+          return (
+            <section className="book" key={book.id}>
+              <div className="info">
+                <div className="meta">{book.category} · {book.license_name || "Open license"}</div>
+                <h2>{book.title}</h2>
+                <p>{book.source_name || "Open textbook source"}</p>
+                <div className="status">
+                  {isHosted ? <span className="hosted">Hosted on StudyBench{parts.length > 1 ? ` · ${parts.length} parts` : ""}</span> : <span className="pending">Not mirrored yet</span>}
+                </div>
               </div>
-            </div>
-            <div className="actions">
-              {book.source_file_url ? (
-                <button type="button" disabled={Boolean(busyId)} onClick={() => mirrorBook(book)}>
-                  {busyId === book.id ? "Mirroring..." : book.hosted_file_url ? "Re-mirror PDF" : "Mirror PDF"}
-                </button>
-              ) : <span className="no-source">Source PDF missing</span>}
-              {book.hosted_file_url && <a href={book.hosted_file_url} target="_blank" rel="noreferrer">Open hosted PDF</a>}
-              {book.status === "published" && <Link href={`/book/${book.id}`} target="_blank">Preview reader</Link>}
-            </div>
-          </section>
-        ))}
+              <div className="actions">
+                {book.source_file_url ? (
+                  <button type="button" disabled={Boolean(busyId)} onClick={() => mirrorBook(book)}>
+                    {busyId === book.id ? "Mirroring..." : isHosted ? "Re-mirror PDF" : "Mirror PDF"}
+                  </button>
+                ) : <span className="no-source">Source PDF missing</span>}
+                {book.hosted_file_url && <a href={book.hosted_file_url} target="_blank" rel="noreferrer">Open hosted PDF</a>}
+                {parts.length > 0 && <a href={parts[0].url} target="_blank" rel="noreferrer">Open Part 1</a>}
+                {book.status === "published" && <Link href={`/book/${book.id}`} target="_blank">Preview reader</Link>}
+              </div>
+            </section>
+          );
+        })}
       </div>
 
       <style jsx>{`
-        .wrap{max-width:980px;margin:0 auto;padding:48px clamp(20px,5vw,54px) 90px}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:28px;margin-bottom:30px}.kicker{font-family:'IBM Plex Mono',monospace;font-size:.7rem;letter-spacing:.14em;text-transform:uppercase;color:var(--brass-soft);margin:0 0 10px}h1{font-family:'Fraunces',serif;color:var(--parchment);font-size:clamp(2rem,5vw,3rem);margin:0}.sub{max-width:650px;color:var(--fog);line-height:1.65}.back,.actions a{font-family:'IBM Plex Mono',monospace;font-size:.72rem;text-decoration:none;color:var(--parchment);border:1px solid rgba(201,162,39,.3);padding:9px 12px;border-radius:4px}.message{padding:12px 14px;margin-bottom:20px;border:1px solid rgba(111,167,154,.4);border-radius:6px;color:var(--teal-soft);background:rgba(111,167,154,.06)}.list{display:grid;gap:14px}.book{display:flex;justify-content:space-between;gap:22px;padding:20px;border:1px solid rgba(201,162,39,.16);border-radius:8px;background:rgba(255,255,255,.025)}.meta{font-family:'IBM Plex Mono',monospace;font-size:.64rem;text-transform:uppercase;letter-spacing:.08em;color:var(--brass-soft)}h2{font-family:'Fraunces',serif;color:var(--parchment);font-size:1.3rem;margin:7px 0 5px}.info>p{margin:0;color:var(--fog);font-size:.85rem}.status{margin-top:10px;font-family:'IBM Plex Mono',monospace;font-size:.65rem}.hosted{color:var(--teal-soft)}.pending{color:var(--fog)}.actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;max-width:360px}.actions button{font-family:'IBM Plex Mono',monospace;font-size:.72rem;border:0;border-radius:4px;padding:10px 13px;background:var(--brass);color:var(--ink-deep);font-weight:600;cursor:pointer}.actions button:disabled{opacity:.55;cursor:wait}.no-source{font-size:.76rem;color:var(--danger)}.state{min-height:70vh;display:grid;place-items:center;color:var(--fog)}@media(max-width:700px){.top,.book{flex-direction:column}.top{gap:16px}.actions{justify-content:flex-start;max-width:none}.actions button,.actions a{flex:1 1 140px;text-align:center}}
+        .wrap{max-width:980px;margin:0 auto;padding:48px clamp(20px,5vw,54px) 90px}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:28px;margin-bottom:30px}.kicker{font-family:'IBM Plex Mono',monospace;font-size:.7rem;letter-spacing:.14em;text-transform:uppercase;color:var(--brass-soft);margin:0 0 10px}h1{font-family:'Fraunces',serif;color:var(--parchment);font-size:clamp(2rem,5vw,3rem);margin:0}.sub{max-width:650px;color:var(--fog);line-height:1.65}.back,.actions a{font-family:'IBM Plex Mono',monospace;font-size:.72rem;text-decoration:none;color:var(--parchment);border:1px solid rgba(201,162,39,.3);padding:9px 12px;border-radius:4px}.message{padding:12px 14px;margin-bottom:20px;border:1px solid rgba(111,167,154,.4);border-radius:6px;color:var(--teal-soft);background:rgba(111,167,154,.06)}.list{display:grid;gap:14px}.book{display:flex;justify-content:space-between;gap:22px;padding:20px;border:1px solid rgba(201,162,39,.16);border-radius:8px;background:rgba(255,255,255,.025)}.meta{font-family:'IBM Plex Mono',monospace;font-size:.64rem;text-transform:uppercase;letter-spacing:.08em;color:var(--brass-soft)}h2{font-family:'Fraunces',serif;color:var(--parchment);font-size:1.3rem;margin:7px 0 5px}.info>p{margin:0;color:var(--fog);font-size:.85rem}.status{margin-top:10px;font-family:'IBM Plex Mono',monospace;font-size:.65rem}.hosted{color:var(--teal-soft)}.pending{color:var(--fog)}.actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;max-width:380px}.actions button{font-family:'IBM Plex Mono',monospace;font-size:.72rem;border:0;border-radius:4px;padding:10px 13px;background:var(--brass);color:var(--ink-deep);font-weight:600;cursor:pointer}.actions button:disabled{opacity:.55;cursor:wait}.no-source{font-size:.76rem;color:var(--danger)}.state{min-height:70vh;display:grid;place-items:center;color:var(--fog)}@media(max-width:700px){.top,.book{flex-direction:column}.top{gap:16px}.actions{justify-content:flex-start;max-width:none}.actions button,.actions a{flex:1 1 140px;text-align:center}}
       `}</style>
     </main>
   );
