@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { PDFDocument } from "pdf-lib";
 import { supabaseAdmin } from "../../../../lib/supabaseServer";
 import { requireAdmin } from "../../../../lib/adminServer";
 
@@ -7,7 +6,7 @@ export const maxDuration = 60;
 
 const BUCKET = "textbooks";
 const MAX_BYTES = 49 * 1024 * 1024;
-const TARGET_PART_BYTES = 42 * 1024 * 1024;
+const CHUNK_BYTES = 40 * 1024 * 1024;
 const ALLOWED_HOSTS = new Set([
   "assets.openstax.org",
   "d3bxy9euw4e147.cloudfront.net",
@@ -23,11 +22,11 @@ function safeName(title) {
     .slice(0, 90) || "textbook";
 }
 
-async function uploadPdf(path, bytes) {
+async function uploadObject(path, bytes, contentType) {
   const { error } = await supabaseAdmin.storage
     .from(BUCKET)
     .upload(path, bytes, {
-      contentType: "application/pdf",
+      contentType,
       cacheControl: "86400",
       upsert: true,
     });
@@ -35,58 +34,19 @@ async function uploadPdf(path, bytes) {
   if (error) throw new Error(error.message);
 
   const { data } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(path);
-  if (!data?.publicUrl) throw new Error("Could not create hosted PDF URL");
+  if (!data?.publicUrl) throw new Error("Could not create hosted file URL");
   return data.publicUrl;
 }
 
-async function buildPdfPart(sourcePdf, pageIndexes) {
-  const part = await PDFDocument.create();
-  const copied = await part.copyPages(sourcePdf, pageIndexes);
-  copied.forEach((page) => part.addPage(page));
-  return part.save({ useObjectStreams: true });
-}
-
-async function splitIntoParts(fileBuffer) {
-  const sourcePdf = await PDFDocument.load(fileBuffer, { ignoreEncryption: true });
-  const totalPages = sourcePdf.getPageCount();
+function splitBinary(fileBuffer) {
+  const bytes = new Uint8Array(fileBuffer);
   const parts = [];
-  let start = 0;
 
-  while (start < totalPages) {
-    let low = start + 1;
-    let high = totalPages;
-    let bestEnd = start;
-    let bestBytes = null;
-
-    while (low <= high) {
-      const mid = Math.floor((low + high) / 2);
-      const indexes = Array.from({ length: mid - start }, (_, i) => start + i);
-      const bytes = await buildPdfPart(sourcePdf, indexes);
-
-      if (bytes.byteLength <= TARGET_PART_BYTES) {
-        bestEnd = mid;
-        bestBytes = bytes;
-        low = mid + 1;
-      } else {
-        high = mid - 1;
-      }
-    }
-
-    if (!bestBytes || bestEnd === start) {
-      const single = await buildPdfPart(sourcePdf, [start]);
-      if (single.byteLength > MAX_BYTES) {
-        throw new Error(`Page ${start + 1} alone exceeds the storage file limit.`);
-      }
-      bestEnd = start + 1;
-      bestBytes = single;
-    }
-
-    parts.push({
-      startPage: start + 1,
-      endPage: bestEnd,
-      bytes: bestBytes,
-    });
-    start = bestEnd;
+  for (let offset = 0, index = 0; offset < bytes.byteLength; offset += CHUNK_BYTES, index += 1) {
+    const end = Math.min(offset + CHUNK_BYTES, bytes.byteLength);
+    const chunk = bytes.slice(offset, end);
+    if (chunk.byteLength > MAX_BYTES) throw new Error("Generated chunk exceeds storage limit.");
+    parts.push({ index, startByte: offset, endByte: end - 1, bytes: chunk });
   }
 
   return parts;
@@ -152,7 +112,7 @@ export async function POST(req) {
   try {
     if (fileBuffer.byteLength <= MAX_BYTES) {
       const path = `${base}.pdf`;
-      const hostedUrl = await uploadPdf(path, fileBuffer);
+      const hostedUrl = await uploadObject(path, fileBuffer, "application/pdf");
 
       const { data: updated, error: updateError } = await supabaseAdmin
         .from("books")
@@ -162,24 +122,25 @@ export async function POST(req) {
         .single();
 
       if (updateError) throw new Error(updateError.message);
-
       return NextResponse.json({ ok: true, mode: "single", book: updated, bytes: fileBuffer.byteLength });
     }
 
-    const splitParts = await splitIntoParts(fileBuffer);
+    const binaryParts = splitBinary(fileBuffer);
     const hostedParts = [];
 
-    for (let i = 0; i < splitParts.length; i += 1) {
-      const part = splitParts[i];
+    for (let i = 0; i < binaryParts.length; i += 1) {
+      const part = binaryParts[i];
       const partNumber = i + 1;
-      const path = `${base}-part-${String(partNumber).padStart(2, "0")}.pdf`;
-      const url = await uploadPdf(path, part.bytes);
+      const path = `${base}-chunk-${String(partNumber).padStart(2, "0")}.bin`;
+      const url = await uploadObject(path, part.bytes, "application/octet-stream");
       hostedParts.push({
         part: partNumber,
-        label: `Part ${partNumber}`,
-        start_page: part.startPage,
-        end_page: part.endPage,
+        label: `Chunk ${partNumber}`,
+        kind: "binary_chunk",
+        start_byte: part.startByte,
+        end_byte: part.endByte,
         bytes: part.bytes.byteLength,
+        total_bytes: fileBuffer.byteLength,
         path,
         url,
       });
@@ -196,7 +157,7 @@ export async function POST(req) {
 
     return NextResponse.json({
       ok: true,
-      mode: "parts",
+      mode: "binary_chunks",
       book: updated,
       bytes: fileBuffer.byteLength,
       parts: hostedParts.length,
