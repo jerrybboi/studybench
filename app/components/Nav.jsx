@@ -48,7 +48,7 @@ export default function Nav({ active, accent = "brass" }) {
   return (
     <nav>
       <Link href="/" className="brand" aria-label="StudyBench home">
-        <span className="brand-mark" aria-hidden="true">SB</span>
+        <img className="brand-mark" src="/studybench-logo.svg" alt="StudyBench logo" />
         <span>
           <span className="brand-name">StudyBench</span>
           <span className="brand-tag">Learn · Practice · Grow</span>
@@ -133,18 +133,12 @@ export default function Nav({ active, accent = "brass" }) {
           min-width: max-content;
         }
         .brand-mark {
-          width: 38px;
-          height: 38px;
+          width: 42px;
+          height: 42px;
           border-radius: 50%;
-          display: grid;
-          place-items: center;
+          object-fit: cover;
           flex-shrink: 0;
-          font-family: 'Fraunces', serif;
-          font-weight: 700;
-          font-size: 0.82rem;
-          color: var(--ink);
-          background: var(--parchment);
-          border: 2px solid ${accentVar};
+          border: 1px solid ${accentBorder};
         }
         .brand-name {
           font-family: 'Fraunces', serif;
@@ -227,19 +221,11 @@ export default function Nav({ active, accent = "brass" }) {
           margin: 4px 0;
           background: var(--parchment);
         }
-        .mobile-panel {
-          display: none;
-        }
+        .mobile-panel { display: none; }
         @media (max-width: 960px) {
-          nav {
-            padding: 14px 18px;
-          }
-          .desktop-nav {
-            display: none;
-          }
-          .menu-button {
-            display: block;
-          }
+          nav { padding: 14px 18px; }
+          .desktop-nav { display: none; }
+          .menu-button { display: block; }
           .mobile-panel {
             position: absolute;
             top: calc(100% + 1px);
@@ -251,10 +237,7 @@ export default function Nav({ active, accent = "brass" }) {
             border-bottom: 1px solid ${accentBorder};
             box-shadow: 0 18px 40px rgba(0, 0, 0, 0.32);
           }
-          .mobile-links {
-            display: grid;
-            gap: 6px;
-          }
+          .mobile-links { display: grid; gap: 6px; }
           .mobile-link,
           .mobile-auth {
             display: block;
@@ -270,20 +253,10 @@ export default function Nav({ active, accent = "brass" }) {
             background: transparent;
             cursor: pointer;
           }
-          .mobile-link.active {
-            color: var(--ink);
-            background: ${accentVar};
-          }
+          .mobile-link.active { color: var(--ink); background: ${accentVar}; }
           .mobile-link:hover,
-          .mobile-auth:hover {
-            color: var(--parchment);
-            border-color: ${accentBorder};
-          }
-          .mobile-auth {
-            margin-top: 12px;
-            border-color: ${accentBorder};
-            color: var(--parchment);
-          }
+          .mobile-auth:hover { color: var(--parchment); border-color: ${accentBorder}; }
+          .mobile-auth { margin-top: 12px; border-color: ${accentBorder}; color: var(--parchment); }
         }
       `}</style>
     </nav>
