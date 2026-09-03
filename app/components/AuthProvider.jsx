@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
 const AuthContext = createContext(null);
@@ -24,21 +24,29 @@ async function adminStatus(session) {
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(undefined);
   const [isAdmin, setIsAdmin] = useState(false);
+  const lastToken = useRef(undefined);
 
   useEffect(() => {
     let active = true;
 
-    supabase.auth.getSession().then(async ({ data }) => {
-      if (!active) return;
-      const nextSession = data.session || null;
-      setSession(nextSession);
-      setIsAdmin(await adminStatus(nextSession));
-    });
+    async function applySession(nextSession) {
+      const normalized = nextSession || null;
+      const token = normalized?.access_token || null;
 
-    const { data: subscription } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
+      if (lastToken.current === token) return;
+      lastToken.current = token;
+
       if (!active) return;
-      setSession(nextSession || null);
-      setIsAdmin(await adminStatus(nextSession));
+      setSession(normalized);
+
+      const nextIsAdmin = await adminStatus(normalized);
+      if (active && lastToken.current === token) setIsAdmin(nextIsAdmin);
+    }
+
+    supabase.auth.getSession().then(({ data }) => applySession(data.session));
+
+    const { data: subscription } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      applySession(nextSession);
     });
 
     return () => {
@@ -49,6 +57,7 @@ export function AuthProvider({ children }) {
 
   async function signOut() {
     await supabase.auth.signOut();
+    lastToken.current = null;
     setSession(null);
     setIsAdmin(false);
   }
