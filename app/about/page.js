@@ -21,7 +21,7 @@ export default function AboutPage() {
 
         <section className="founder-card" aria-labelledby="founder-title">
           <div className="founder-image-wrap">
-            <img className="founder-image" src="/jerry-boi-founder.svg" alt="Jerry Boi, founder of StudyBench" />
+            <img className="founder-image" src="/jerry-boi-founder-exact.jpg" alt="Jerry Boi, founder of StudyBench" />
           </div>
 
           <div className="founder-copy">
