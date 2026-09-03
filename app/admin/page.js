@@ -20,48 +20,70 @@ const EMPTY_FORM = {
 export default function AdminPage() {
   const router = useRouter();
   const [checking, setChecking] = useState(true);
-  const [stats, setStats] = useState({ users: 0, generations: 0, unlimited: 0, published: 0 });
+  const [stats, setStats] = useState({ users: "-", generations: "-", unlimited: "-", published: "-" });
   const [books, setBooks] = useState([]);
+  const [logs, setLogs] = useState([]);
   const [form, setForm] = useState(EMPTY_FORM);
   const [formOpen, setFormOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
-  async function getHeaders() {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) return null;
-    return { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" };
-  }
-
-  async function loadDashboard(headers) {
-    const [booksRes, logsRes] = await Promise.all([
-      fetch("/api/admin/books/list", { headers, cache: "no-store" }),
-      fetch("/api/admin/logs", { headers, cache: "no-store" }),
-    ]);
-
-    if (booksRes.ok) {
-      const data = await booksRes.json();
-      setBooks(data.books || []);
-    }
-    if (logsRes.ok) {
-      const data = await logsRes.json();
-      if (data.stats) setStats(data.stats);
-    }
-  }
-
   useEffect(() => {
     async function init() {
-      const headers = await getHeaders();
-      if (!headers) return router.replace("/");
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) return router.replace("/");
 
-      const check = await fetch("/api/admin/check", { headers, cache: "no-store" });
-      if (!check.ok) return router.replace("/");
+        const check = await fetch("/api/admin/check", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+          cache: "no-store",
+        });
+        if (!check.ok) return router.replace("/");
 
-      await loadDashboard(headers);
-      setChecking(false);
+        await loadDashboard();
+      } catch {
+        router.replace("/");
+      } finally {
+        setChecking(false);
+      }
     }
-    init().catch(() => router.replace("/"));
+    init();
   }, [router]);
+
+  async function loadDashboard() {
+    setMessage("");
+    const now = new Date().toISOString();
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+    const [booksRes, profilesRes, usageRes, unlimitedRes, publishedRes] = await Promise.all([
+      supabase.from("books").select("*").order("created_at", { ascending: false }),
+      supabase.from("profiles").select("id", { count: "exact", head: true }),
+      supabase.from("usage_log").select("user_id,count,window_start").gte("window_start", since).order("window_start", { ascending: false }),
+      supabase.from("profiles").select("id", { count: "exact", head: true }).gt("unlimited_until", now),
+      supabase.from("books").select("id", { count: "exact", head: true }).eq("status", "published"),
+    ]);
+
+    const firstError = [booksRes.error, profilesRes.error, usageRes.error, unlimitedRes.error, publishedRes.error].find(Boolean);
+    if (firstError) {
+      setMessage(`Dashboard data error: ${firstError.message}`);
+      return;
+    }
+
+    setBooks(booksRes.data || []);
+    const usageRows = usageRes.data || [];
+    setStats({
+      users: profilesRes.count ?? 0,
+      generations: usageRows.reduce((sum, row) => sum + (row.count || 0), 0),
+      unlimited: unlimitedRes.count ?? 0,
+      published: publishedRes.count ?? 0,
+    });
+    setLogs(usageRows.map((row) => ({
+      type: "AI usage",
+      user: row.user_id,
+      detail: `${row.count || 0} generation${row.count === 1 ? "" : "s"}`,
+      when: row.window_start ? new Date(row.window_start).toLocaleString() : "-",
+    })));
+  }
 
   function openCreate() {
     setForm(EMPTY_FORM);
@@ -90,51 +112,49 @@ export default function AdminPage() {
     e.preventDefault();
     setBusy(true);
     setMessage("");
-    try {
-      const headers = await getHeaders();
-      if (!headers) return router.replace("/");
 
-      const endpoint = form.id ? "/api/admin/books/update" : "/api/admin/books/create";
-      const res = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify(form) });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not save book");
+    const payload = {
+      title: form.title.trim(),
+      category: form.category.trim(),
+      wing: form.wing,
+      description: form.description.trim(),
+      is_free: form.is_free,
+      amazon_query: form.is_free ? null : (form.amazon_query.trim() || null),
+      content: form.is_free ? form.content : null,
+      status: form.status,
+    };
 
-      if (form.id) setBooks((prev) => prev.map((b) => b.id === data.book.id ? data.book : b));
-      else setBooks((prev) => [data.book, ...prev]);
+    const result = form.id
+      ? await supabase.from("books").update(payload).eq("id", form.id).select("*").single()
+      : await supabase.from("books").insert(payload).select("*").single();
 
-      setFormOpen(false);
-      setForm(EMPTY_FORM);
-      setMessage("Saved successfully.");
-    } catch (err) {
-      setMessage(err.message || "Could not save book.");
-    } finally {
+    if (result.error) {
+      setMessage(result.error.message);
       setBusy(false);
+      return;
     }
+
+    setFormOpen(false);
+    setForm(EMPTY_FORM);
+    setMessage("Saved successfully.");
+    await loadDashboard();
+    setBusy(false);
   }
 
   async function setStatus(book, status) {
-    const headers = await getHeaders();
-    if (!headers) return router.replace("/");
     setBusy(true);
-    const res = await fetch("/api/admin/books/update", {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ id: book.id, status }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setBooks((prev) => prev.map((b) => b.id === data.book.id ? data.book : b));
-    }
+    const { error } = await supabase.from("books").update({ status }).eq("id", book.id);
+    if (error) setMessage(error.message);
+    else await loadDashboard();
     setBusy(false);
   }
 
   async function deleteBook(id) {
     if (!window.confirm("Delete this book permanently?")) return;
-    const headers = await getHeaders();
-    if (!headers) return router.replace("/");
     setBusy(true);
-    const res = await fetch("/api/admin/books/delete", { method: "POST", headers, body: JSON.stringify({ id }) });
-    if (res.ok) setBooks((prev) => prev.filter((b) => b.id !== id));
+    const { error } = await supabase.from("books").delete().eq("id", id);
+    if (error) setMessage(error.message);
+    else await loadDashboard();
     setBusy(false);
   }
 
@@ -143,71 +163,122 @@ export default function AdminPage() {
   return (
     <>
       <nav>
-        <Link href="/" className="brand"><span className="brand-mark">SB</span><span className="brand-name">StudyBench</span><span className="admin-badge">Admin</span></Link>
+        <Link href="/" className="brand">
+          <img className="brand-mark" src="/studybench-logo.svg" alt="StudyBench logo" />
+          <span className="brand-name">StudyBench</span>
+          <span className="admin-badge">Admin</span>
+        </Link>
         <Link href="/" className="exit">← Back to site</Link>
       </nav>
 
       <main className="wrap">
-        <section className="topline">
-          <div><p className="eyebrow">Founder tools</p><h1>Admin overview</h1></div>
-          <button className="primary" onClick={openCreate}>+ New book</button>
-        </section>
+        <h1 className="page-title">Admin overview</h1>
+        <p className="page-sub warn">Protected admin area. Only authorized StudyBench admins can access these tools.</p>
 
         {message && <div className="message">{message}</div>}
 
+        <div className="stats">
+          <Stat label="Signed-up users" value={stats.users} sub="profiles table" />
+          <Stat label="AI generations today" value={stats.generations} sub="usage_log (24h window)" />
+          <Stat label="Unlimited members" value={stats.unlimited} sub="unlimited_until > now" />
+          <Stat label="Books published" value={stats.published} sub="status = published" />
+        </div>
+
+        <div className="section-head">
+          <h2 className="section-title">Book manager</h2>
+          <button className="upload-btn" onClick={openCreate}>+ Upload new book</button>
+        </div>
+
         {formOpen && (
-          <form className="editor" onSubmit={saveBook}>
-            <div className="editor-head"><h2>{form.id ? "Edit book" : "Create book"}</h2><button type="button" className="ghost" onClick={() => setFormOpen(false)}>Close</button></div>
-            <div className="grid two">
-              <label>Title<input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required /></label>
-              <label>Category<input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} required /></label>
-              <label>Wing<select value={form.wing} onChange={(e) => setForm({ ...form, wing: e.target.value })}><option value="educational">Educational</option><option value="web3">Web3</option></select></label>
-              <label>Status<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}><option value="draft">Draft</option><option value="published">Published</option></select></label>
+          <form className="upload-form" onSubmit={saveBook}>
+            <div className="form-head">
+              <h3>{form.id ? "Edit book" : "New book"}</h3>
+              <button type="button" className="action-btn" onClick={() => setFormOpen(false)}>Close</button>
             </div>
-            <label>Description<textarea rows="3" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} required /></label>
-            <label className="check"><input type="checkbox" checked={form.is_free} onChange={(e) => setForm({ ...form, is_free: e.target.checked })} /> Free hosted title</label>
+            <div className="form-row">
+              <input placeholder="Title" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
+              <input placeholder="Category" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} required />
+              <select value={form.wing} onChange={(e) => setForm({ ...form, wing: e.target.value })}>
+                <option value="educational">educational</option>
+                <option value="web3">web3</option>
+              </select>
+              <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                <option value="draft">draft</option>
+                <option value="published">published</option>
+              </select>
+            </div>
+            <textarea placeholder="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} required rows={3} />
+            <label className="check-label">
+              <input type="checkbox" checked={form.is_free} onChange={(e) => setForm({ ...form, is_free: e.target.checked })} />
+              Free hosted title
+            </label>
             {form.is_free ? (
-              <label>Full reading content<textarea className="content" rows="16" value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} placeholder="Paste the complete licensed/original text here." /></label>
+              <textarea className="content-input" placeholder="Full licensed or original reading content" value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} rows={14} />
             ) : (
-              <label>Amazon search query<input value={form.amazon_query} onChange={(e) => setForm({ ...form, amazon_query: e.target.value })} placeholder="Book title author" /></label>
+              <input placeholder="Amazon search query" value={form.amazon_query} onChange={(e) => setForm({ ...form, amazon_query: e.target.value })} />
             )}
-            <button className="primary" type="submit" disabled={busy}>{busy ? "Saving..." : "Save book"}</button>
+            <button type="submit" className="upload-btn" disabled={busy}>{busy ? "Saving..." : "Save book"}</button>
           </form>
         )}
 
-        <section className="stats">
-          <Stat label="Profiles" value={stats.users} />
-          <Stat label="AI generations, 24h" value={stats.generations} />
-          <Stat label="Unlimited members" value={stats.unlimited} />
-          <Stat label="Published books" value={stats.published} />
-        </section>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Title</th><th>Wing</th><th>Status</th><th>Added</th><th>Actions</th></tr></thead>
+            <tbody>
+              {books.map((b) => (
+                <tr key={b.id}>
+                  <td className="book-title-cell">{b.title}</td>
+                  <td>{b.wing} · {b.category}</td>
+                  <td><span className={`status ${b.status === "published" ? "status-published" : "status-draft"}`}>{b.status}</span></td>
+                  <td className="mono">{b.created_at ? new Date(b.created_at).toLocaleDateString() : "-"}</td>
+                  <td className="row-actions">
+                    <button className="action-btn" onClick={() => openEdit(b)}>Edit</button>
+                    {b.is_free && b.status === "published" && <Link className="action-btn" href={`/book/${b.id}`} target="_blank">Preview</Link>}
+                    <button className={`action-btn ${b.status === "draft" ? "publish" : ""}`} onClick={() => setStatus(b, b.status === "published" ? "draft" : "published")} disabled={busy}>{b.status === "published" ? "Unpublish" : "Publish"}</button>
+                    <button className="action-btn danger" onClick={() => deleteBook(b.id)} disabled={busy}>Delete</button>
+                  </td>
+                </tr>
+              ))}
+              {books.length === 0 && <tr><td colSpan={5} className="empty-cell">No books found.</td></tr>}
+            </tbody>
+          </table>
+        </div>
 
-        <section>
-          <div className="section-head"><h2>Book manager</h2><span>{books.length} total</span></div>
-          <div className="book-list">
-            {books.map((book) => (
-              <article className="book" key={book.id}>
-                <div className="book-main"><p className="meta">{book.wing} · {book.category}</p><h3>{book.title}</h3><p>{book.description}</p><span className={`status ${book.status}`}>{book.status}</span></div>
-                <div className="actions">
-                  <button onClick={() => openEdit(book)}>Edit</button>
-                  {book.is_free && book.status === "published" && <Link href={`/book/${book.id}`} target="_blank">Preview</Link>}
-                  <button onClick={() => setStatus(book, book.status === "published" ? "draft" : "published")} disabled={busy}>{book.status === "published" ? "Unpublish" : "Publish"}</button>
-                  <button className="danger" onClick={() => deleteBook(book.id)} disabled={busy}>Delete</button>
-                </div>
-              </article>
-            ))}
-            {books.length === 0 && <p className="empty">No books found.</p>}
-          </div>
-        </section>
+        <div className="section-head log-head"><h2 className="section-title">Usage &amp; payment log</h2></div>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Type</th><th>User</th><th>Detail</th><th>When</th></tr></thead>
+            <tbody>
+              {logs.map((row, i) => <tr key={i}><td>{row.type}</td><td className="mono">{row.user}</td><td>{row.detail}</td><td className="mono">{row.when}</td></tr>)}
+              {logs.length === 0 && <tr><td colSpan={4} className="empty-cell">No recent activity.</td></tr>}
+            </tbody>
+          </table>
+        </div>
       </main>
 
       <style jsx>{`
-        nav{position:sticky;top:0;z-index:50;display:flex;align-items:center;justify-content:space-between;padding:16px clamp(18px,5vw,64px);background:#0b131c;border-bottom:1px solid rgba(201,162,39,.2)}.brand{display:flex;align-items:center;gap:9px;text-decoration:none}.brand-mark{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:var(--parchment);color:var(--ink);border:2px solid var(--brass);font-family:'Fraunces',serif;font-weight:700}.brand-name{font-family:'Fraunces',serif;color:var(--parchment);font-size:1.05rem}.admin-badge{font-family:'IBM Plex Mono',monospace;font-size:.62rem;color:var(--danger);border:1px solid rgba(196,84,74,.5);padding:3px 8px;border-radius:3px}.exit{font-family:'IBM Plex Mono',monospace;color:var(--fog);font-size:.78rem;text-decoration:none}.wrap{max-width:1180px;margin:0 auto;padding:40px clamp(18px,5vw,64px) 90px}.topline,.section-head,.editor-head{display:flex;align-items:center;justify-content:space-between;gap:16px}.eyebrow,.meta{font-family:'IBM Plex Mono',monospace;text-transform:uppercase;letter-spacing:.1em;color:var(--brass-soft);font-size:.68rem}h1,h2,h3{font-family:'Fraunces',serif;color:var(--parchment)}h1{font-size:clamp(2rem,5vw,3rem);margin:6px 0 0}.primary,.ghost,.actions button,.actions a{font-family:'IBM Plex Mono',monospace;border-radius:4px;cursor:pointer;text-decoration:none}.primary{border:0;background:var(--brass);color:var(--ink);padding:11px 16px;font-weight:600}.ghost,.actions button,.actions a{border:1px solid rgba(159,176,192,.28);background:transparent;color:var(--parchment);padding:8px 11px}.message{margin:18px 0;padding:11px 14px;border:1px solid rgba(111,167,154,.35);color:var(--teal-soft);border-radius:5px}.editor{margin:28px 0 36px;padding:24px;background:rgba(255,255,255,.03);border:1px solid rgba(201,162,39,.2);border-radius:10px}.editor h2{margin:0}.grid.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}.editor label{display:grid;gap:7px;margin:14px 0;color:var(--fog);font-size:.8rem;font-family:'IBM Plex Mono',monospace}.editor input,.editor textarea,.editor select{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid rgba(159,176,192,.25);border-radius:4px;background:#0f1b27;color:var(--parchment);font:inherit}.editor textarea.content{font-family:'Source Sans 3',sans-serif;line-height:1.6}.editor .check{display:flex;align-items:center;gap:9px}.editor .check input{width:auto}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:34px 0 48px}.section-head{margin-bottom:16px}.section-head h2{margin:0}.section-head span{color:var(--fog);font-family:'IBM Plex Mono',monospace;font-size:.75rem}.book-list{display:grid;gap:14px}.book{display:flex;justify-content:space-between;gap:20px;padding:20px;border:1px solid rgba(201,162,39,.14);border-radius:8px;background:rgba(255,255,255,.025)}.book-main h3{margin:5px 0 8px}.book-main>p:not(.meta){color:var(--fog);font-size:.86rem;line-height:1.5;margin:0 0 10px}.status{font-family:'IBM Plex Mono',monospace;font-size:.62rem;text-transform:uppercase;padding:4px 8px;border-radius:3px}.status.published{background:rgba(111,167,154,.15);color:var(--teal-soft)}.status.draft{background:rgba(159,176,192,.12);color:var(--fog)}.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.actions .danger{color:#e88b82;border-color:rgba(196,84,74,.4)}.checking,.empty{min-height:60vh;display:grid;place-items:center;color:var(--fog)}@media(max-width:800px){.grid.two,.stats{grid-template-columns:1fr 1fr}.book{flex-direction:column}.actions{justify-content:flex-start}.topline{align-items:flex-start}.brand-name{display:none}}@media(max-width:520px){.stats{grid-template-columns:1fr}.grid.two{grid-template-columns:1fr}}
+        nav{position:sticky;top:0;z-index:50;display:flex;align-items:center;justify-content:space-between;padding:16px clamp(20px,5vw,64px);background:#0b131c;border-bottom:1px solid rgba(201,162,39,.16)}
+        .brand{display:flex;align-items:center;gap:8px;text-decoration:none}.brand-mark{width:44px;height:44px;border-radius:50%;object-fit:cover}.brand-name{font-family:'Fraunces',serif;font-weight:600;font-size:1rem;color:var(--parchment)}
+        .admin-badge{font-family:'IBM Plex Mono',monospace;font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;color:var(--danger);border:1px solid rgba(196,84,74,.4);padding:3px 9px;border-radius:3px;margin-left:6px}.exit{font-family:'IBM Plex Mono',monospace;font-size:.78rem;text-decoration:none;color:var(--fog);border:1px solid rgba(159,176,192,.3);padding:8px 14px;border-radius:3px}
+        .wrap{max-width:1180px;margin:0 auto;padding:36px clamp(20px,5vw,64px) 80px}.page-title{font-family:'Fraunces',serif;font-weight:600;font-size:1.7rem;color:var(--parchment);margin:0 0 6px}.page-sub{font-size:.88rem;color:var(--fog);margin:0 0 20px}.warn{color:var(--danger);background:rgba(196,84,74,.1);border:1px solid rgba(196,84,74,.3);padding:10px 16px;border-radius:6px;margin-bottom:32px}.message{margin:0 0 22px;padding:11px 14px;border:1px solid rgba(111,167,154,.35);color:var(--teal-soft);border-radius:5px}
+        .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:44px}.section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px}.section-title{font-family:'Fraunces',serif;font-weight:600;font-size:1.35rem;color:var(--parchment);margin:0}.upload-btn{font-family:'IBM Plex Mono',monospace;font-size:.72rem;border:0;border-radius:4px;padding:10px 15px;background:var(--brass);color:var(--ink);font-weight:600;cursor:pointer}
+        .upload-form{display:grid;gap:12px;padding:18px;margin:0 0 22px;border:1px solid rgba(201,162,39,.2);border-radius:8px;background:rgba(255,255,255,.025)}.form-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.form-head h3{font-family:'Fraunces',serif;color:var(--parchment);margin:0}.form-row{display:grid;grid-template-columns:2fr 1.2fr 1fr 1fr;gap:10px}.upload-form input,.upload-form textarea,.upload-form select{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid rgba(159,176,192,.25);border-radius:4px;background:#0f1b27;color:var(--parchment);font-family:'Source Sans 3',sans-serif}.content-input{line-height:1.55}.check-label{display:flex;align-items:center;gap:8px;color:var(--fog);font-size:.82rem}.check-label input{width:auto}
+        .table-wrap{overflow-x:auto;border:1px solid rgba(201,162,39,.12);border-radius:7px}table{width:100%;border-collapse:collapse;min-width:760px;background:rgba(255,255,255,.015)}th{font-family:'IBM Plex Mono',monospace;text-transform:uppercase;letter-spacing:.08em;font-size:.64rem;color:var(--brass-soft);text-align:left;padding:12px 14px;border-bottom:1px solid rgba(201,162,39,.2)}td{padding:13px 14px;color:var(--fog);font-size:.82rem;border-bottom:1px solid rgba(159,176,192,.09);vertical-align:middle}tr:last-child td{border-bottom:0}.book-title-cell{font-family:'Fraunces',serif;color:var(--parchment);font-size:.92rem}.mono{font-family:'IBM Plex Mono',monospace;font-size:.7rem}.status{font-family:'IBM Plex Mono',monospace;font-size:.6rem;text-transform:uppercase;padding:4px 8px;border-radius:3px}.status-published{background:rgba(111,167,154,.15);color:var(--teal-soft)}.status-draft{background:rgba(159,176,192,.12);color:var(--fog)}.row-actions{display:flex;gap:6px;flex-wrap:wrap}.action-btn{font-family:'IBM Plex Mono',monospace;font-size:.64rem;padding:6px 8px;border-radius:3px;border:1px solid rgba(159,176,192,.3);background:transparent;color:var(--parchment);cursor:pointer;text-decoration:none}.action-btn.publish{color:var(--teal-soft);border-color:rgba(111,167,154,.4)}.action-btn.danger{color:#e88b82;border-color:rgba(196,84,74,.4)}.empty-cell{text-align:center;padding:34px;color:var(--fog)}.log-head{margin-top:42px}.checking{min-height:60vh;display:grid;place-items:center;color:var(--fog)}
+        @media(max-width:720px){.brand-name{display:none}.brand-mark{width:42px;height:42px}.form-row{grid-template-columns:1fr}.wrap{padding-top:28px}}
       `}</style>
     </>
   );
 }
 
-function Stat({ label, value }) {
-  return <div className="stat"><p>{label}</p><strong>{value}</strong><style jsx>{`.stat{padding:18px;border:1px solid rgba(201,162,39,.15);border-radius:8px;background:rgba(255,255,255,.025)}p{font-family:'IBM Plex Mono',monospace;color:var(--brass-soft);font-size:.64rem;text-transform:uppercase;letter-spacing:.08em;margin:0 0 8px}strong{font-family:'Fraunces',serif;color:var(--parchment);font-size:1.8rem}`}</style></div>;
+function Stat({ label, value, sub }) {
+  return (
+    <div className="stat">
+      <div className="stat-label">{label}</div>
+      <div className="stat-value">{value}</div>
+      <div className="stat-sub">{sub}</div>
+      <style jsx>{`
+        .stat{background:rgba(255,255,255,.03);border:1px solid rgba(201,162,39,.15);border-radius:8px;padding:18px 20px}.stat-label{font-family:'IBM Plex Mono',monospace;font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;color:var(--brass-soft);margin-bottom:8px}.stat-value{font-family:'Fraunces',serif;font-weight:600;font-size:1.7rem;color:var(--parchment)}.stat-sub{font-size:.76rem;color:var(--fog);margin-top:4px}
+      `}</style>
+    </div>
+  );
 }
