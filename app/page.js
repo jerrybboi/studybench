@@ -48,7 +48,7 @@ export default function HomePage() {
             <span>Understand it.</span>
           </h1>
           <p className="hero-copy">
-            StudyBench brings reading, practice, AI-assisted study, and Web3 education into one place without turning the homepage into the whole app.
+            One place to read, practice, ask questions, and build real understanding across school subjects and Web3.
           </p>
           <div className="hero-actions">
             <Link href="/educational" className="primary-btn">
@@ -61,10 +61,10 @@ export default function HomePage() {
         </section>
 
         <section className="intro">
-          <p className="section-kicker">Choose where you want to go</p>
-          <h2>Four parts, separate pages.</h2>
+          <p className="section-kicker">Explore StudyBench</p>
+          <h2>Everything has its place.</h2>
           <p className="section-copy">
-            The homepage introduces StudyBench. The actual learning tools and libraries live in their own sections, so you can go straight to what you need.
+            Pick a section and go straight to the kind of learning you need. Each part of StudyBench has its own focused space.
           </p>
 
           <div className="area-grid">
