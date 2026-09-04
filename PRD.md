@@ -349,6 +349,52 @@ From the product side, V1 should also allow an administrator to manage content a
 
 ---
 
+# V1 UPGRADE / POLISH PASS
+
+After the core V1 is stable, StudyBench should receive a focused polish pass before moving into the larger V2 feature set.
+
+This upgrade does not change the core product direction. Its purpose is to make the existing product feel more polished, easier to navigate, and more consistent across desktop and mobile.
+
+## 1. UI Refinement
+
+Improve the existing interface without abandoning the StudyBench visual identity.
+
+Focus areas include:
+
+- Stronger visual hierarchy across pages
+- Better spacing and layout consistency
+- More polished typography and content density
+- Cleaner cards, buttons, forms, and section presentation
+- Better consistency between Educational, Web3, Ask AI, About, authentication, and admin interfaces
+- Improved mobile responsiveness and touch-friendly controls
+- More deliberate empty, loading, success, and error states
+- Accessibility improvements such as clearer focus states, readable contrast, and understandable labels
+
+The established dark green/chalkboard, parchment/off-white, and brass/gold identity should remain recognizable while the overall execution becomes more refined.
+
+## 2. Navigation Upgrade
+
+Improve the site navigation so users can understand where they are and move between major product areas more easily.
+
+The navigation upgrade should include:
+
+- Clearer desktop navigation hierarchy
+- A cleaner and more reliable mobile menu
+- Stronger active-page states
+- Better spacing and prioritization of primary links
+- More obvious authentication/account actions where appropriate
+- Admin navigation remaining visible only to authorized administrators
+- Consistent navigation behavior across all public pages
+- Preservation of the established routes, including `/educational`, `/web3`, `/ask-ai`, `/about`, and `/admin`
+
+The goal is to make navigation feel intentional rather than simply functional.
+
+## 3. V1 Polish Acceptance Goal
+
+The V1 polish pass is successful when a first-time user can open StudyBench on desktop or mobile, understand the page structure quickly, move between the main sections without hesitation, and experience a consistent visual system throughout the product.
+
+---
+
 # NOT NOW
 
 The following features are intentionally outside V1.
@@ -644,6 +690,8 @@ V2 should make the product remember the learner.
 The intended progression is:
 
 **V1:** Content + Practice + AI
+
+**V1 Upgrade:** UI polish + navigation refinement + consistency
 
 **V2:** Memory + Progress + Personalization
 
